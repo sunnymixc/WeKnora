@@ -109,13 +109,13 @@ export default defineConfig({
           if (id.includes('marked') || id.includes('katex')) {
             return 'vendor-markdown'
           }
-          if (id.includes('highlight.js')) {
-            return 'vendor-highlight'
-          }
-          if (id.includes('tdesign-vue-next')) {
-            return 'vendor-tdesign'
-          }
+          // 注意:tdesign-vue-next / highlight.js / vue 三者之间存在跨包循环引用。
+          // 若各自拆成独立 chunk,vite 7.3 + rollup 4.59 会生成 circular chunk,
+          // 运行时触发 "Cannot access 'xx' before initialization"(TDZ)。
+          // 将三者合并到同一个 chunk,即可彻底断开 chunk 之间的循环。
           if (
+            id.includes('highlight.js') ||
+            id.includes('tdesign-vue-next') ||
             id.includes('/vue/') ||
             id.includes('/vue-router/') ||
             id.includes('/pinia/') ||
