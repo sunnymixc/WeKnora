@@ -96,9 +96,10 @@
     </div>
 
     <!-- Logo - Top Left -->
-    <a href="https://github.com/Tencent/WeKnora" target="_blank" class="header-logo" :title="$t('common.github')">
-      <img src="@/assets/img/weknora.png" alt="WeKnora" class="logo-image" />
-    </a>
+    <div class="header-logo hospital-brand" title="中山医院肾内科智能问答平台">
+      <img class="hospital-logo-image" src="@/assets/img/zhongshan-hospital-logo.png" alt="复旦大学附属中山医院" />
+      <span class="hospital-platform">肾内科智能问答平台</span>
+    </div>
 
     <!-- Header Links - Top Right -->
     <div class="header-links">
@@ -1139,11 +1140,33 @@ onMounted(async () => {
   top: 32px;
   left: 50px;
   z-index: 100;
-  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(3, 44, 52, 0.74);
+  box-shadow: 0 18px 44px rgba(5, 46, 43, 0.2);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 
-  .logo-image {
-    width: 120px;
+  .hospital-logo-image {
+    display: block;
+    width: 246px;
     height: auto;
+    object-fit: contain;
+  }
+
+  .hospital-platform {
+    padding: 6px 9px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
   }
 }
 
@@ -1593,8 +1616,8 @@ onMounted(async () => {
     top: 26px;
     left: 40px;
 
-    .logo-image {
-      width: 100px;
+    .hospital-logo-image {
+      width: 220px;
     }
   }
 
@@ -1641,8 +1664,12 @@ onMounted(async () => {
     top: 22px;
     left: 30px;
 
-    .logo-image {
-      width: 80px;
+    .hospital-platform {
+      display: none;
+    }
+
+    .hospital-logo-image {
+      width: 206px;
     }
   }
 
@@ -1700,9 +1727,10 @@ onMounted(async () => {
   .header-logo {
     top: 18px;
     left: 20px;
+    padding: 8px 10px;
 
-    .logo-image {
-      width: 70px;
+    .hospital-logo-image {
+      width: 176px;
     }
   }
 
@@ -1768,10 +1796,6 @@ html[theme-mode="dark"] {
 
   .connection-line {
     stroke: rgba(255, 255, 255, 0.25);
-  }
-
-  .header-logo .logo-image {
-    filter: invert(1) hue-rotate(180deg) brightness(1.1);
   }
 
   .header-link {

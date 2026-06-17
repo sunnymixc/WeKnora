@@ -2,8 +2,13 @@
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-                <img class="logo" src="@/assets/img/weknora.png" alt="">
+            <div class="logo_box" @click="router.push('/platform/knowledge-bases')"
+                aria-label="中山医院肾内科智能问答平台" style="cursor: pointer;">
+                <span class="hospital-logo-card">
+                    <img class="hospital-logo-image" src="@/assets/img/zhongshan-hospital-logo.png"
+                        alt="复旦大学附属中山医院">
+                    <span class="hospital-platform">肾内科智能问答平台</span>
+                </span>
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="logo_actions">
@@ -1258,6 +1263,36 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         .logo {
             width: 128px;
             height: auto;
+        }
+
+        .hospital-logo-card {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start;
+            min-width: 0;
+            max-width: 172px;
+            padding: 6px 8px 5px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #0a3f4a, #0f766e);
+            box-shadow: 0 8px 20px rgba(7, 73, 82, 0.18);
+        }
+
+        .hospital-logo-image {
+            display: block;
+            width: 154px;
+            max-width: 100%;
+            height: auto;
+            object-fit: contain;
+        }
+
+        .hospital-platform {
+            margin-top: 3px;
+            color: rgba(255, 255, 255, 0.88);
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1;
+            white-space: nowrap;
         }
 
         .lite-badge {
