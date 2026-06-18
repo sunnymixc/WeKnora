@@ -18,10 +18,12 @@
                   <KbUploadSourceDropdown
                     :accept-file-types="acceptFileTypes"
                     :supported-file-types="supportedFileTypes"
+                    :kb-id="kbInfo?.id || ''"
                     :tooltip="t('uploadConfirm.continueAdd')"
                     placement="bottom-left"
                     @files="appendFiles"
                     @url="appendUrl"
+                    @local="appendServerPath"
                   />
                 </div>
               </div>
@@ -51,6 +53,23 @@
                     shape="square"
                     :aria-label="t('common.remove')"
                     @click="removeUrl(index)"
+                  >
+                    <t-icon name="close" />
+                  </t-button>
+                </li>
+                <li v-for="(spath, index) in localServerPaths" :key="`local-${spath}-${index}`" class="file-item">
+                  <t-icon name="server" class="file-icon" />
+                  <div class="file-meta">
+                    <span class="file-name" :title="spath">{{ serverPathBaseName(spath) }}</span>
+                    <span class="file-size">{{ t('uploadConfirm.localItemLabel') }}</span>
+                  </div>
+                  <t-button
+                    theme="default"
+                    variant="text"
+                    size="small"
+                    shape="square"
+                    :aria-label="t('common.remove')"
+                    @click="removeServerPath(index)"
                   >
                     <t-icon name="close" />
                   </t-button>
@@ -298,6 +317,7 @@ const props = withDefaults(defineProps<{
   mode?: UploadConfirmMode
   files?: File[]
   urls?: string[]
+  localPaths?: string[]
   manualPreview?: UploadConfirmManualSource | null
   reparsePreview?: UploadConfirmReparseSource | null
   tagId?: string
@@ -307,6 +327,7 @@ const props = withDefaults(defineProps<{
   mode: 'file',
   files: () => [],
   urls: () => [],
+  localPaths: () => [],
   manualPreview: null,
   reparsePreview: null,
   acceptFileTypes: '',
@@ -326,6 +347,7 @@ const uiStore = useUIStore()
 const allModels = ref<any[]>([])
 const localFiles = ref<File[]>([])
 const localUrls = ref<string[]>([])
+const localServerPaths = ref<string[]>([])
 const activeSection = ref('overview')
 const uiState = ref<UploadUIState>(createDefaultUIState())
 
@@ -389,7 +411,7 @@ function inferMediaExtsFromMarkdown(content: string): string[] {
 
 const manualCharCount = computed(() => props.manualPreview?.content?.length ?? 0)
 
-const batchItemCount = computed(() => localFiles.value.length + localUrls.value.length)
+const batchItemCount = computed(() => localFiles.value.length + localUrls.value.length + localServerPaths.value.length)
 
 const sourcePanelTitle = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.manualSource')
@@ -773,6 +795,7 @@ watch(
     if (!visible) return
     localFiles.value = props.mode === 'file' ? [...(props.files || [])] : []
     localUrls.value = props.mode === 'file' ? [...(props.urls || [])] : []
+    localServerPaths.value = props.mode === 'file' ? [...(props.localPaths || [])] : []
     initFromKbInfo(props.kbInfo)
     if (props.mode === 'reparse') {
       applyOverridesToState(props.reparsePreview?.processOverrides)
@@ -814,6 +837,15 @@ const appendUrl = (url: string) => {
   MessagePlugin.success(t('uploadConfirm.urlAdded'))
 }
 
+const appendServerPath = (path: string) => {
+  if (localServerPaths.value.includes(path)) {
+    MessagePlugin.warning(t('uploadConfirm.localDuplicate'))
+    return
+  }
+  localServerPaths.value = [...localServerPaths.value, path]
+  MessagePlugin.success(t('uploadConfirm.localAdded'))
+}
+
 const removeUrl = (index: number) => {
   localUrls.value = localUrls.value.filter((_, i) => i !== index)
 }
@@ -821,6 +853,13 @@ const removeUrl = (index: number) => {
 const removeFile = (index: number) => {
   localFiles.value = localFiles.value.filter((_, i) => i !== index)
 }
+
+const removeServerPath = (index: number) => {
+  localServerPaths.value = localServerPaths.value.filter((_, i) => i !== index)
+}
+
+// Display only the basename of a server path for compactness.
+const serverPathBaseName = (p: string) => p.split('/').pop() || p
 
 const handleParserEngineRulesUpdate = (rules: Array<{ file_types: string[]; engine: string }>) => {
   uiState.value.chunkingConfig.parserEngineRules = rules
@@ -900,6 +939,7 @@ const handleConfirm = () => {
       mode: 'file',
       files: [...localFiles.value],
       urls: [...localUrls.value],
+      localPaths: [...localServerPaths.value],
     })
   }
   emit('update:visible', false)

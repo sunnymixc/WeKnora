@@ -7,6 +7,9 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -367,6 +370,184 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		secutils.SanitizeForLog(knowledge.ID),
 		secutils.SanitizeForLog(knowledge.Title),
 	)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    knowledge,
+	})
+}
+
+// localFileEntry is one item returned by ListLocalFiles.
+type localFileEntry struct {
+	Name    string `json:"name"`
+	IsDir   bool   `json:"is_dir"`
+	Size    int64  `json:"size"`
+	ModTime int64  `json:"mod_time"` // unix seconds
+}
+
+// ListLocalFiles godoc
+// @Summary      浏览服务器本地导入目录
+// @Description  列出 LOCAL_IMPORT_BASE_DIR 根目录下指定子路径的文件与目录，供「从服务器本地导入」选择
+// @Tags         知识管理
+// @Produce      json
+// @Param        id    path   string  true   "知识库ID"
+// @Param        path  query  string  false  "相对根目录的子路径，默认根目录"
+// @Success      200   {object}  map[string]interface{}  "目录条目列表"
+// @Failure      400   {object}  errors.AppError         "路径非法或未启用"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/local-files [get]
+func (h *KnowledgeHandler) ListLocalFiles(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Validate KB access + write permission (same gate as import).
+	_, _, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to browse local files"))
+		return
+	}
+
+	baseDir := utils.GetLocalImportBaseDir()
+	if baseDir == "" {
+		c.Error(errors.NewBadRequestError("未启用本地文件导入功能"))
+		return
+	}
+
+	relPath := c.Query("path")
+	absPath, err := secutils.SafePathUnderBase(baseDir, filepath.Join(baseDir, relPath))
+	if err != nil {
+		logger.Warnf(ctx, "Local files path traversal denied: %v", err)
+		c.Error(errors.NewBadRequestError("非法的目录路径"))
+		return
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("目录不存在或不可访问"))
+		return
+	}
+	if !info.IsDir() {
+		c.Error(errors.NewBadRequestError("所选路径不是一个目录"))
+		return
+	}
+
+	dirEntries, err := os.ReadDir(absPath)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to read local import directory: %v", err)
+		c.Error(errors.NewInternalServerError("读取目录失败"))
+		return
+	}
+
+	entries := make([]localFileEntry, 0, len(dirEntries))
+	for _, de := range dirEntries {
+		fi, err := de.Info()
+		if err != nil {
+			continue // skip unreadable entries
+		}
+		// Only surface regular files and directories (skip symlinks/devices).
+		if !fi.IsDir() && !fi.Mode().IsRegular() {
+			continue
+		}
+		entries = append(entries, localFileEntry{
+			Name:    de.Name(),
+			IsDir:   fi.IsDir(),
+			Size:    fi.Size(),
+			ModTime: fi.ModTime().Unix(),
+		})
+	}
+	// Directories first, then files, each alphabetically.
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir
+		}
+		return entries[i].Name < entries[j].Name
+	})
+
+	// Normalize the current path relative to base for the breadcrumb.
+	curRel, _ := filepath.Rel(baseDir, absPath)
+	if curRel == "." {
+		curRel = ""
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"path":    filepath.ToSlash(curRel),
+			"entries": entries,
+		},
+	})
+}
+
+// CreateKnowledgeFromLocalFile godoc
+// @Summary      从服务器本地文件导入知识
+// @Description  从 LOCAL_IMPORT_BASE_DIR 根目录下的指定文件路径导入文档，复用与上传一致的存储与解析管线
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        request  body      object{path=string,tag_id=string,channel=string,enable_multimodel=bool}  true  "本地导入请求"
+// @Success      200      {object}  map[string]interface{}  "创建的知识"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      409      {object}  map[string]interface{}  "文件重复"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/local [post]
+func (h *KnowledgeHandler) CreateKnowledgeFromLocalFile(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start creating knowledge from local file")
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
+		return
+	}
+
+	var req struct {
+		Path             string                           `json:"path" binding:"required"`
+		TagID            string                           `json:"tag_id"`
+		Channel          string                           `json:"channel"`
+		EnableMultimodel *bool                            `json:"enable_multimodel"`
+		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse local import request", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Local import request, KB: %s, path: %s", kbID, secutils.SanitizeForLog(req.Path))
+
+	tagID := req.TagID
+	if tagID == "__untagged__" {
+		tagID = ""
+	}
+
+	knowledge, err := h.kgService.CreateKnowledgeFromLocalPath(
+		ctx, kbID, req.Path, req.EnableMultimodel, tagID, req.Channel, req.ProcessConfig,
+	)
+	if err != nil {
+		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
+			return
+		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge created from local file successfully, ID: %s", secutils.SanitizeForLog(knowledge.ID))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    knowledge,

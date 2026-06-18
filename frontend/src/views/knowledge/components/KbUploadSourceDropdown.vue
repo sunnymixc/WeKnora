@@ -57,6 +57,13 @@
         <div class="url-input-tip">{{ t('knowledgeBase.urlTip') }}</div>
       </div>
     </t-dialog>
+
+    <LocalFileBrowserDialog
+      v-if="kbId"
+      v-model:visible="localDialogVisible"
+      :kb-id="kbId"
+      @select="handleLocalSelect"
+    />
   </div>
 </template>
 
@@ -65,11 +72,13 @@ import { ref, computed, h, withDefaults } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { filterUploadFiles } from '../utils/uploadSources'
+import LocalFileBrowserDialog from './LocalFileBrowserDialog.vue'
 
 const props = withDefaults(defineProps<{
   acceptFileTypes?: string
   supportedFileTypes?: string[]
   includeManual?: boolean
+  kbId?: string
   triggerIcon?: string
   triggerClass?: string
   dataGuide?: string
@@ -79,6 +88,7 @@ const props = withDefaults(defineProps<{
   acceptFileTypes: '',
   supportedFileTypes: () => [],
   includeManual: false,
+  kbId: '',
   triggerIcon: 'file-add',
   triggerClass: '',
   dataGuide: '',
@@ -89,6 +99,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   files: [files: File[]]
   url: [url: string]
+  local: [path: string]
   manual: []
 }>()
 
@@ -98,6 +109,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const urlDialogVisible = ref(false)
 const urlInputValue = ref('')
+const localDialogVisible = ref(false)
 
 const tooltipText = computed(() => props.tooltip || t('knowledgeBase.addDocument'))
 
@@ -119,6 +131,13 @@ const dropdownOptions = computed(() => {
       prefixIcon: () => h(TIcon, { name: 'link', size: '16px' }),
     },
   ]
+  if (props.kbId) {
+    options.push({
+      content: t('localImport.menuLabel'),
+      value: 'importLocal',
+      prefixIcon: () => h(TIcon, { name: 'server', size: '16px' }),
+    })
+  }
   if (props.includeManual) {
     options.push({
       content: t('upload.onlineEdit'),
@@ -140,6 +159,9 @@ const handleActionSelect = (data: { value: string }) => {
     case 'importURL':
       urlInputValue.value = ''
       urlDialogVisible.value = true
+      break
+    case 'importLocal':
+      localDialogVisible.value = true
       break
     case 'manualCreate':
       emit('manual')
@@ -206,6 +228,11 @@ const handleUrlDialogConfirm = () => {
 const handleUrlDialogCancel = () => {
   urlDialogVisible.value = false
   urlInputValue.value = ''
+}
+
+const handleLocalSelect = (path: string) => {
+  localDialogVisible.value = false
+  emit('local', path)
 }
 
 const openUrlDialog = () => {

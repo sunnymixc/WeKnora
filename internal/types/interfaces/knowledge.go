@@ -40,6 +40,19 @@ type KnowledgeService interface {
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	// CreateKnowledgeFromLocalPath creates knowledge from a file residing on the
+	// server's local file system, under the configured LOCAL_IMPORT_BASE_DIR root.
+	// relPath is interpreted relative to that root. channel identifies the
+	// ingestion channel; empty defaults to "web".
+	CreateKnowledgeFromLocalPath(
+		ctx context.Context,
+		kbID string,
+		relPath string,
+		enableMultimodel *bool,
+		tagID string,
+		channel string,
+		processOverrides *types.KnowledgeProcessOverrides,
+	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
 	CreateKnowledgeFromPassage(ctx context.Context, kbID string, passage []string, channel string) (*types.Knowledge, error)

@@ -33,6 +33,7 @@ import {
   deleteKnowledgeBaseTag,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
+  createKnowledgeFromLocalFile,
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
@@ -1548,6 +1549,47 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
   }
 };
 
+const executeLocalImport = async (path: string, processConfig?: KnowledgeProcessOverrides) => {
+  const targetKbId = kbId.value;
+  if (!targetKbId) {
+    MessagePlugin.error(t('error.missingKbId'));
+    return;
+  }
+
+  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  try {
+    const responseData: any = await createKnowledgeFromLocalFile(targetKbId, {
+      path,
+      tag_id: tagIdToUpload,
+      process_config: processConfig,
+    });
+    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
+      detail: { kbId: targetKbId },
+    }));
+    const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
+    if (isSuccess) {
+      MessagePlugin.success(t('localImport.importSuccess'));
+    } else {
+      let errorMessage = t('localImport.importFailed');
+      if (responseData?.error?.message) {
+        errorMessage = responseData.error.message;
+      } else if (responseData?.message) {
+        errorMessage = responseData.message;
+      }
+      if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
+        errorMessage = t('knowledgeBase.fileExists');
+      }
+      MessagePlugin.error(errorMessage);
+    }
+  } catch (error: any) {
+    let errorMessage = error?.error?.message || error?.message || t('localImport.importFailed');
+    if (error?.code === 'duplicate_file') {
+      errorMessage = t('knowledgeBase.fileExists');
+    }
+    MessagePlugin.error(errorMessage);
+  }
+};
+
 const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   if (result.mode === 'manual') {
     return;
@@ -1555,6 +1597,7 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
 
   const files = result.files || [];
   const urls = result.urls || [];
+  const localPaths = result.localPaths || [];
   const processConfig = result.processConfig;
 
   if (files.length > 0) {
@@ -1571,17 +1614,22 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   for (const url of urls) {
     await executeUrlImport(url, processConfig);
   }
+
+  for (const localPath of localPaths) {
+    await executeLocalImport(localPath, processConfig);
+  }
 };
 
-const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
+const openUploadConfirmDialog = async (files: File[], urls: string[] = [], localPaths: string[] = []) => {
   if (!kbInfo.value) return;
-  if (files.length === 0 && urls.length === 0) return;
+  if (files.length === 0 && urls.length === 0 && localPaths.length === 0) return;
   try {
     const result = await uploadConfirmStore.open({
       mode: 'file',
       kbInfo: kbInfo.value,
       files,
       urls,
+      localPaths,
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
     });
@@ -1600,6 +1648,11 @@ const handleUploadSourceFiles = (files: File[]) => {
 const handleUploadSourceUrl = (url: string) => {
   if (!ensureDocumentKbReady()) return;
   openUploadConfirmDialog([], [url]);
+};
+
+const handleUploadSourceLocal = (path: string) => {
+  if (!ensureDocumentKbReady()) return;
+  openUploadConfirmDialog([], [], [path]);
 };
 
 const handleManualCreate = () => {
@@ -2226,6 +2279,7 @@ async function createNewSession(value: string): Promise<void> {
                     :accept-file-types="acceptFileTypes"
                     :supported-file-types="[...supportedFileTypes]"
                     include-manual
+                    :kb-id="kbId"
                     trigger-icon="file-add"
                     trigger-class="content-bar-icon-btn"
                     data-guide="kb-detail-add-doc"
@@ -2233,6 +2287,7 @@ async function createNewSession(value: string): Promise<void> {
                     placement="bottom-right"
                     @files="handleUploadSourceFiles"
                     @url="handleUploadSourceUrl"
+                    @local="handleUploadSourceLocal"
                     @manual="handleManualCreate"
                   />
                 </div>

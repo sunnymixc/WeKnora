@@ -75,6 +75,14 @@ func calculateStr(strList ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// calculateBytesHash calculates the MD5 hash of raw bytes, matching the scheme
+// used by calculateFileHash so that local-imported files dedup against uploads.
+func calculateBytesHash(data []byte) string {
+	h := md5.New()
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.KnowledgeBase) (*types.DocParserVLMConfig, error) {
 	if kb == nil {
 		return nil, nil

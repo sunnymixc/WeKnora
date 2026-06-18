@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -287,6 +288,228 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Knowledge from file created successfully, ID: %s", knowledge.ID)
+	return knowledge, nil
+}
+
+// CreateKnowledgeFromLocalPath creates a knowledge entry from a file that already
+// resides on the server's local file system, under the configured
+// LOCAL_IMPORT_BASE_DIR root. The source bytes are copied into the knowledge
+// base's storage backend (SaveBytes) and then handed to the exact same
+// asynchronous document-processing pipeline as a multipart upload — the
+// resulting Knowledge has Type "file" and is indistinguishable from an upload.
+//
+// relPath is interpreted relative to LOCAL_IMPORT_BASE_DIR; every resolved path
+// is confined under that root via SafePathUnderBase to prevent traversal.
+func (s *knowledgeService) CreateKnowledgeFromLocalPath(ctx context.Context,
+	kbID string, relPath string, enableMultimodel *bool, tagID string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	logger.Info(ctx, "Start creating knowledge from local path")
+
+	baseDir := secutils.GetLocalImportBaseDir()
+	if baseDir == "" {
+		logger.Error(ctx, "Local import is not enabled (LOCAL_IMPORT_BASE_DIR unset)")
+		return nil, werrors.NewBadRequestError("未启用本地文件导入功能")
+	}
+
+	// Resolve and confine the path under the configured root.
+	absPath, err := secutils.SafePathUnderBase(baseDir, filepath.Join(baseDir, relPath))
+	if err != nil {
+		logger.Errorf(ctx, "Local import path traversal denied: %v", err)
+		return nil, werrors.NewBadRequestError("非法的文件路径")
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to stat local import file: %v", err)
+		return nil, werrors.NewBadRequestError("文件不存在或不可访问")
+	}
+	if !info.Mode().IsRegular() {
+		logger.Errorf(ctx, "Local import target is not a regular file: %s", absPath)
+		return nil, werrors.NewBadRequestError("所选路径不是一个文件")
+	}
+
+	fileName := filepath.Base(absPath)
+	logger.Infof(ctx, "Knowledge base ID: %s, local file: %s", kbID, fileName)
+
+	if IsVideoType(getFileType(fileName)) {
+		logger.Error(ctx, "Video file import is not supported")
+		return nil, werrors.NewBadRequestError("暂不支持导入视频文件")
+	}
+
+	// Validate file size against the same limit as uploads.
+	maxSize := secutils.GetMaxFileSizeMB() * 1024 * 1024
+	if info.Size() > maxSize {
+		logger.Error(ctx, "Local import file size too large")
+		return nil, werrors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", secutils.GetMaxFileSizeMB()))
+	}
+
+	// Get knowledge base configuration
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
+		return nil, err
+	}
+
+	// FAQ knowledge bases should not accept file uploads — use the FAQ import API instead
+	if kb.Type == types.KnowledgeBaseTypeFAQ {
+		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件导入，请使用 FAQ 导入功能")
+	}
+
+	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
+		return nil, err
+	}
+
+	// Validate file type
+	if !isValidFileType(fileName) {
+		logger.Error(ctx, "Invalid file type")
+		return nil, ErrInvalidFileType
+	}
+
+	// Validate filename safety
+	safeFilename, isValid := secutils.ValidateInput(fileName)
+	if !isValid {
+		logger.Errorf(ctx, "Invalid filename: %s", fileName)
+		return nil, werrors.NewValidationError("文件名包含非法字符")
+	}
+
+	// Read the file bytes (used for hashing, dedup and storage).
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to read local import file: %v", err)
+		return nil, werrors.NewInternalServerError("读取文件失败")
+	}
+	hash := calculateBytesHash(data)
+
+	// Check if file already exists (dedup, same scheme as upload)
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+		Type:     "file",
+		FileName: safeFilename,
+		FileSize: info.Size(),
+		FileHash: hash,
+	})
+	if err != nil {
+		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
+		return nil, err
+	}
+	if exists {
+		logger.Infof(ctx, "File already exists: %s", safeFilename)
+		if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
+			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
+			return nil, err
+		}
+		return existingKnowledge, types.NewDuplicateFileError(existingKnowledge)
+	}
+
+	// Check storage quota
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed >= tenantInfo.StorageQuota {
+		logger.Error(ctx, "Storage quota exceeded")
+		return nil, types.NewStorageQuotaExceededError()
+	}
+
+	eff := ResolveProcessConfig(kb, processOverrides)
+	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
+		eff.EnableMultimodel = *enableMultimodel
+	}
+	if processOverrides != nil {
+		if err := ValidateProcessOverrides(ctx, kb, processOverrides, []string{getFileType(safeFilename)}); err != nil {
+			return nil, err
+		}
+	}
+
+	// Prepare knowledge record
+	knowledge := &types.Knowledge{
+		ID:               uuid.New().String(),
+		TenantID:         tenantID,
+		KnowledgeBaseID:  kbID,
+		TagID:            tagID,
+		Type:             "file",
+		Channel:          defaultChannel(channel),
+		Title:            safeFilename,
+		FileName:         safeFilename,
+		FileType:         getFileType(safeFilename),
+		FileSize:         info.Size(),
+		FileHash:         hash,
+		Source:           absPath, // 记录服务器本地来源，便于溯源
+		ParseStatus:      "pending",
+		EnableStatus:     "disabled",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+		EmbeddingModelID: kb.EmbeddingModelID,
+	}
+	if processOverrides != nil {
+		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
+			logger.Errorf(ctx, "Failed to set process overrides: %v", err)
+			return nil, err
+		}
+	}
+
+	// Copy the bytes into the KB's storage backend.
+	fileSvc := s.resolveFileService(ctx, kb)
+	filePath, err := fileSvc.SaveBytes(ctx, data, knowledge.TenantID, safeFilename, false)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to save local file bytes, knowledge ID: %s, error: %v", knowledge.ID, err)
+		return nil, err
+	}
+	knowledge.FilePath = filePath
+
+	// Save knowledge record to database after the file is safely stored.
+	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
+		if deleteErr := fileSvc.DeleteFile(ctx, filePath); deleteErr != nil {
+			logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v", filePath, deleteErr)
+		}
+		return nil, err
+	}
+
+	// Enqueue document processing task to Asynq (same pipeline as upload)
+	enableQuestionGeneration := eff.QuestionGenerationConfig.Enabled
+	questionCount := eff.QuestionGenerationConfig.QuestionCount
+	if questionCount <= 0 {
+		questionCount = 3
+	}
+
+	lang, _ := types.LanguageFromContext(ctx)
+	taskPayload := types.DocumentProcessPayload{
+		TenantID:                 tenantID,
+		KnowledgeID:              knowledge.ID,
+		KnowledgeBaseID:          kbID,
+		FilePath:                 filePath,
+		FileName:                 safeFilename,
+		FileType:                 getFileType(safeFilename),
+		EnableMultimodel:         eff.EnableMultimodel,
+		EnableQuestionGeneration: enableQuestionGeneration,
+		QuestionCount:            questionCount,
+		Language:                 lang,
+	}
+
+	langfuse.InjectTracing(ctx, &taskPayload)
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal document process task payload: %v", err)
+		return knowledge, nil
+	}
+
+	task := asynq.NewTask(
+		types.TypeDocumentProcess,
+		payloadBytes,
+		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+	)
+	info2, err := s.task.Enqueue(task)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
+		return knowledge, nil
+	}
+	logger.Infof(ctx, "Enqueued document process task: id=%s queue=%s knowledge_id=%s",
+		info2.ID, info2.Queue, knowledge.ID)
+
+	if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(safeFilename)) {
+		NewDataTableSummaryTask(ctx, s.task, tenantID, knowledge.ID, kb.SummaryModelID, kb.EmbeddingModelID)
+	}
+
+	logger.Infof(ctx, "Knowledge from local path created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
 }
 

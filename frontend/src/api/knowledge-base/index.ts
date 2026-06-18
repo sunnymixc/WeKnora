@@ -194,6 +194,23 @@ export function createKnowledgeFromURL(
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
 
+// 浏览服务器本地导入目录（LOCAL_IMPORT_BASE_DIR 根目录下）
+// path: 相对根目录的子路径，默认根目录
+export function listLocalFiles(kbId: string, path = '') {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+  return get(`/api/v1/knowledge-bases/${kbId}/knowledge/local-files${qs}`);
+}
+
+// 从服务器本地文件导入知识
+// data.path: 相对 LOCAL_IMPORT_BASE_DIR 根目录的文件路径
+// data.tag_id: 可选，指定知识所属的分类ID
+export function createKnowledgeFromLocalFile(
+  kbId: string,
+  data: { path: string; tag_id?: string; process_config?: KnowledgeProcessOverrides },
+) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/local`, data);
+}
+
 // 手工创建知识
 // data.tag_id: 可选，指定知识所属的分类ID
 export function createManualKnowledge(

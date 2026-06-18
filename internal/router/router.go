@@ -290,6 +290,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kb := r.Group("/knowledge-bases/:id/knowledge")
 	{
 		kb.POST("/file", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
+		kb.GET("/local-files", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ListLocalFiles)
+		kb.POST("/local", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromLocalFile)
 		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
 		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
 		kb.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)

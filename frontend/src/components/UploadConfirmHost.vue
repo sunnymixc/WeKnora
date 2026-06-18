@@ -20,6 +20,7 @@ const handleCancel = () => {
     :kb-info="uploadConfirmStore.kbInfo"
     :files="uploadConfirmStore.files"
     :urls="uploadConfirmStore.urls"
+    :local-paths="uploadConfirmStore.localPaths"
     :manual-preview="uploadConfirmStore.manual"
     :reparse-preview="uploadConfirmStore.reparse"
     :accept-file-types="uploadConfirmStore.acceptFileTypes"
