@@ -48,7 +48,7 @@ export default {
     reopen: "新手引导",
     steps: {
       welcome: {
-        title: "欢迎使用中山医院肾内科智能问答平台",
+        title: "欢迎使用中山医院肾内科AI精准用药助手",
         desc: "只需几步，带你快速了解知识库、对话与智能体的核心用法。点击「下一步」开始。",
       },
       knowledge: {
@@ -1504,7 +1504,7 @@ export default {
   },
   initialization: {
     title: "初始化",
-    welcome: "欢迎使用中山医院肾内科智能问答平台",
+    welcome: "欢迎使用中山医院肾内科AI精准用药助手",
     description: "请先配置系统以开始使用",
     step1: "步骤1：配置LLM模型",
     step2: "步骤2：配置嵌入模型",

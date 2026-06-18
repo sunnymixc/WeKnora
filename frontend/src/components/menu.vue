@@ -3,11 +3,11 @@
         <!-- 展开时：Logo + 折叠按钮同行（搜索已独立成行，见下方 menu_box--cmdk） -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')"
-                aria-label="中山医院肾内科智能问答平台" style="cursor: pointer;">
+                aria-label="中山医院肾内科AI精准用药助手" style="cursor: pointer;">
                 <span class="hospital-logo-card">
                     <img class="hospital-logo-image" src="@/assets/img/zhongshan-hospital-logo.png"
                         alt="复旦大学附属中山医院">
-                    <span class="hospital-platform">肾内科智能问答平台</span>
+                    <span class="hospital-platform">肾内科AI精准用药助手</span>
                 </span>
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>

@@ -96,9 +96,9 @@
     </div>
 
     <!-- Logo - Top Left -->
-    <div class="header-logo hospital-brand" title="中山医院肾内科智能问答平台">
+    <div class="header-logo hospital-brand" title="中山医院肾内科AI精准用药助手">
       <img class="hospital-logo-image" src="@/assets/img/zhongshan-hospital-logo.png" alt="复旦大学附属中山医院" />
-      <span class="hospital-platform">肾内科智能问答平台</span>
+      <span class="hospital-platform">肾内科AI精准用药助手</span>
     </div>
 
     <!-- Header Links - Top Right -->
