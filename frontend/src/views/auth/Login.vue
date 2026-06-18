@@ -1046,6 +1046,8 @@ onMounted(async () => {
 .carousel-container {
   width: 100%;
   margin-top: 48px;
+  /* 隐藏内容但保留占位，不影响整体布局 */
+  visibility: hidden;
 }
 
 .screenshot-swiper {
