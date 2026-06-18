@@ -2393,7 +2393,7 @@ const getImgSrc = (url: string) => {
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
   border: .5px solid var(--td-component-border, #E7E7E7);
-  box-shadow: 0 6px 6px 0 rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 0 1px 2px rgba(0, 0, 0, 0.04);
 
   &:focus-within {
     border-color: var(--td-brand-color, #07C05F);
