@@ -36,6 +36,8 @@ services:
       - "${APP_PORT:-8080}:8080"
     volumes:
       - data-files:/data/files
+      # 「从服务器本地导入」源目录：宿主机 /root/data/kms 挂载到容器 /data/import（= LOCAL_IMPORT_BASE_DIR）
+      - /root/data/kms:/data/import
       - docreader-tmp:/tmp/docreader:ro
       - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
