@@ -71,6 +71,12 @@ MAIN_PATH=./cmd/server
 # Docker related variables
 DOCKER_IMAGE=wechatopenai/weknora-app
 DOCKER_TAG=latest
+# Debian apt 镜像源(仅替换主机名),可用 APK_MIRROR= 置空以直连官方源
+APK_MIRROR?=mirrors.aliyun.com
+# PyPI 镜像源(pip/uv 共用)
+PIP_INDEX?=https://pypi.tuna.tsinghua.edu.cn/simple
+# GitHub release 下载代理前缀(如 https://ghfast.top/),默认直连
+GH_PROXY?=
 
 # Platform detection
 ifeq ($(shell uname -m),x86_64)
@@ -110,11 +116,17 @@ docker-build-app:
 		--build-arg COMMIT_ID_ARG="$$COMMIT_ID" \
 		--build-arg BUILD_TIME_ARG="$$BUILD_TIME" \
 		--build-arg GO_VERSION_ARG="$$GO_VERSION" \
+		--build-arg APK_MIRROR_ARG="$(APK_MIRROR)" \
+		--build-arg PIP_INDEX_ARG="$(PIP_INDEX)" \
 		-f docker/Dockerfile.app -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 # Build docreader Docker image
 docker-build-docreader:
-	docker build --platform $(PLATFORM) -f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
+	docker build --platform $(PLATFORM) \
+		--build-arg APT_MIRROR="$(if $(APK_MIRROR),http://$(APK_MIRROR))" \
+		--build-arg PIP_INDEX_ARG="$(PIP_INDEX)" \
+		--build-arg GH_PROXY_ARG="$(GH_PROXY)" \
+		-f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
 
 # Build frontend Docker image
 docker-build-frontend:

@@ -3,13 +3,21 @@
 # =========================
 FROM python:3.10.18-bookworm AS builder
 
-ARG APT_MIRROR=""
+# Debian apt 镜像源(含协议前缀),可用 APT_MIRROR= 置空以直连官方源
+ARG APT_MIRROR="http://mirrors.aliyun.com"
 RUN if [ -n "$APT_MIRROR" ]; then \
         sed -i "s@http://deb.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources && \
         sed -i "s@http://security.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources; \
     fi
 
 WORKDIR /app
+
+# PyPI 镜像(pip/uv 共用),可用 PIP_INDEX_ARG= 置空以直连官方源
+ARG PIP_INDEX_ARG=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_ARG}
+ENV UV_INDEX_URL=${PIP_INDEX_ARG}
+# GitHub release 下载代理前缀(如 https://ghfast.top/),默认直连
+ARG GH_PROXY_ARG=""
 
 # 安装构建依赖
 RUN apt-get update && apt-get install -y \
@@ -57,7 +65,7 @@ RUN if [ -z "$TARGETARCH" ]; then \
         rm -f /app/${PROTOC_PACKAGE}; \
     else \
         echo "未发现本地protoc安装包，将进行在线安装"; \
-        curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.19.4/${PROTOC_PACKAGE} && \
+        curl -LO ${GH_PROXY_ARG}https://github.com/protocolbuffers/protobuf/releases/download/v3.19.4/${PROTOC_PACKAGE} && \
         unzip -o ${PROTOC_PACKAGE} -d /usr/local && \
         chmod +x /usr/local/bin/protoc && \
         rm -f ${PROTOC_PACKAGE}; \
@@ -81,13 +89,20 @@ RUN chmod +x docreader/scripts/generate_proto.sh && \
 # =========================
 FROM python:3.10.18-bookworm AS runner
 
-ARG APT_MIRROR=""
+# Debian apt 镜像源(含协议前缀),可用 APT_MIRROR= 置空以直连官方源
+ARG APT_MIRROR="http://mirrors.aliyun.com"
 RUN if [ -n "$APT_MIRROR" ]; then \
         sed -i "s@http://deb.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources && \
         sed -i "s@http://security.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources; \
     fi
 
 WORKDIR /app
+
+# PyPI 镜像同时供构建期和运行期的 uv 使用
+ARG PIP_INDEX_ARG=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_ARG}
+ENV UV_INDEX_URL=${PIP_INDEX_ARG}
+ARG GH_PROXY_ARG=""
 
 # 安装运行时依赖（已移除 OCR/PaddleOCR 相关依赖）
 RUN apt-get update && apt-get install -y \
@@ -132,7 +147,7 @@ RUN if [ -z "$TARGETARCH" ]; then \
         "arm") ARCH="arm" ;; \
         *) echo "Unsupported architecture: $TARGETARCH" && exit 1 ;; \
     esac && \
-    wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH} && \
+    wget -qO/bin/grpc_health_probe ${GH_PROXY_ARG}https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH} && \
     chmod +x /bin/grpc_health_probe
 
 # 从构建阶段复制已安装的依赖和生成的代码
@@ -143,7 +158,10 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 安装 Playwright 浏览器（网页解析）
-RUN python -m playwright install webkit
+# 浏览器二进制走 npmmirror 镜像,可用 PLAYWRIGHT_MIRROR_ARG= 置空以直连官方 CDN
+ARG PLAYWRIGHT_MIRROR_ARG=https://npmmirror.com/mirrors/playwright
+RUN if [ -n "$PLAYWRIGHT_MIRROR_ARG" ]; then export PLAYWRIGHT_DOWNLOAD_HOST="$PLAYWRIGHT_MIRROR_ARG"; fi && \
+    python -m playwright install webkit
 RUN python -m playwright install-deps webkit
 
 COPY docreader/pyproject.toml docreader/uv.lock ./

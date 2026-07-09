@@ -4,31 +4,35 @@ FROM golang:1.26-bookworm AS builder
 WORKDIR /app
 
 # 通过构建参数接收敏感信息
-ARG GOPRIVATE_ARG
+ARG GOPRIVATE_ARG=""
 ARG GOPROXY_ARG=https://goproxy.cn,direct
 ARG GOSUMDB_ARG=off
-ARG APK_MIRROR_ARG
+ARG APK_MIRROR_ARG=mirrors.aliyun.com
 
 # 设置Go环境变量
 ENV GOPRIVATE=${GOPRIVATE_ARG}
 ENV GOPROXY=${GOPROXY_ARG}
 ENV GOSUMDB=${GOSUMDB_ARG}
 
-# Install dependencies
+# Install dependencies (golang:bookworm 已自带 git/build-essential)
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
-    apt-get install -y git build-essential libsqlite3-dev
+    apt-get install -y libsqlite3-dev
 
 # Install migrate tool
-RUN --mount=type=cache,target=/go/pkg/mod go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 # Copy go mod and sum files
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd/download cmd/download
-RUN go run cmd/download/duckdb/duckdb.go
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go run cmd/download/duckdb/duckdb.go
 COPY . .
 
 # Get version and commit info for build injection
@@ -44,7 +48,10 @@ ENV BUILD_TIME=${BUILD_TIME_ARG}
 ENV GO_VERSION=${GO_VERSION_ARG}
 
 # Build the application with version info
-RUN --mount=type=cache,target=/go/pkg/mod make build-prod
+# go-build 缓存挂载让增量构建只重编译改动的包(CGO 全量重编非常慢)
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    make build-prod
 RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Final stage
@@ -52,34 +59,31 @@ FROM debian:12.12-slim
 
 WORKDIR /app
 
-ARG APK_MIRROR_ARG
+ARG APK_MIRROR_ARG=mirrors.aliyun.com
+# PyPI 镜像:pip 安装用 PIP_INDEX_URL,uv/uvx(含运行时)用 UV_INDEX_URL
+ARG PIP_INDEX_ARG=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_ARG}
+ENV UV_INDEX_URL=${PIP_INDEX_ARG}
 
 # Create a non-root user first
 RUN useradd -m -s /bin/bash appuser
 
-# First, install ca-certificates without mirror to ensure HTTPS works
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-# Then switch to mirror if specified and install other packages
+# 先换源再装包:sed 只替换主机名、协议仍是 http,不依赖 ca-certificates;
+# apt 包有签名校验,http 传输不影响完整性。合并成一层减少一次 apt-get update。
+# uv/uvx 改由 pip 从 PyPI 镜像安装(wheel 自带二进制,落在 /usr/local/bin),避免 astral.sh 脚本从 GitHub 下载。
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
+        ca-certificates \
         build-essential postgresql-client default-mysql-client tzdata sed curl bash vim wget \
         libsqlite3-0 \
         python3 python3-pip python3-dev libffi-dev libssl-dev \
         nodejs npm \
         gosu \
         ffmpeg && \
-    python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
-    mkdir -p /home/appuser/.local/bin && \
-    curl -LsSf https://astral.sh/uv/install.sh | CARGO_HOME=/home/appuser/.cargo UV_INSTALL_DIR=/home/appuser/.local/bin sh && \
-    chown -R appuser:appuser /home/appuser && \
-    ln -sf /home/appuser/.local/bin/uvx /usr/local/bin/uvx && \
-    chmod +x /usr/local/bin/uvx && \
+    python3 -m pip install --break-system-packages --upgrade pip setuptools wheel uv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -101,9 +105,6 @@ COPY --from=builder /app/skills/preloaded ./skills/preloaded
 COPY --from=builder /app/skills/preloaded ./skills/_builtin
 COPY --from=builder /root/.duckdb /home/appuser/.duckdb
 COPY --from=builder /app/WeKnora .
-
-# Copy and make entrypoint script executable
-COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 
 # Make scripts executable
 RUN chmod +x ./scripts/*.sh
